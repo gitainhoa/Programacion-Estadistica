@@ -1,0 +1,1022 @@
+---
+title: "ANALISIS ESTADISTICO - Master BI y BD"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Ainhoa Calvo Ejerique
+
+
+```{r}
+library("ggplot2", lib.loc="/Library/Frameworks/R.framework/Versions/3.3/Resources/library")
+library(dplyr)
+library(e1071)
+library(sampling)
+library(GGally)
+library(grid)
+library(gridExtra)
+library(scales)
+library(memisc)
+library(scales)
+library(lattice)
+library(MASS)
+library(car)
+library(reshape)
+library(prettyR)
+library(nortest)
+```
+
+Descripción del dataset 'diamonds'.
+
+```{r}
+?diamonds
+```
+
+Carga del dataset 'diamonds'
+
+```{r}
+dt<-as.data.frame(diamonds)
+```
+
+0. Introducción (Limpieza del dataframe y estadística descriptiva univariante de la población)
+
+Se incluye un apartado 0 de caracter introductorio, en el que se realizará:
+i) estadística descriptiva univariante -principalmente- del dataframe diamonds.
+ii) eliminación de outliers.
+
+Mediante la función str(), se realiza una simple inspección de la estructura del dataframe.
+
+```{r}
+str(dt)
+```
+
+El dataframe dt contiene 53940 observaciones y 10 variables.  Las variables son de distintos tipos: ‘carat’, ‘depth’, ‘table’, ‘x’, ‘y’, ‘z’ son numéricas, ‘price’ es un integer y ‘cut’, ‘color’, ‘clarity’ son factores.
+
+De la descripción del dataframe 'diamonds', se observa que las variables 'depth' y 'carat', son combinación de 'x', 'y' y 'z'; y que la variable 'table' es una transformación de la variable 'y'. Esto se tendrá en cuenta en el análisis econométrico, ya que puede generar problemas de multicolinealidad y de falta de precisión de los estimadores, entre otros. Se aplicará VIF para estudiar la colinealidad en el apartado 4.
+
+En primer lugar, se procederá a la ordenación de los factores según la documentación que acompaña al dataframe.
+
+```{r}
+levels(dt$color)
+levels(dt$clarity)
+levels(dt$cut)
+```
+
+Se comprueba que hay que ordenar 'color' y 'clarity'.
+
+```{r}
+dt$color <-ordered(dt$color, levels=c("J", "I", "H", "G", "F", "E", "D"))
+dt$clarity <- ordered(dt$clarity, levels = c("I1", "SI1", "SI2", "VS1", "VS2", "VVS1", "VVS2", "IF"))
+```
+
+Primer análisis exploratorio del dataframe mediante la función summary()
+
+```{r}
+summary(dt)
+```
+
+Puede observarse que las variables 'x', 'y', 'z', constitutivas del volumen del diamante observado, toman valores mínimos==0. Estas observaciones se eliminarán. (Una alternativa sería utilizar técnicas de imputación de missing values, siempre que los patrones de los missing values fueran aleatorios, lo que podría comprobarse, por ejemplo, mediante el test de Little). 
+
+```{r}
+dt2<-subset(dt, !(x<=0|y<=0|z<=0))
+```
+
+Utilizando la función str() puede observarse que se han eliminado 20 observaciones.
+
+El análisis descriptivo básico de las variables incluye: medidas de posición central, medidas de posición no central y medidas de dispersión. Este análisis de medidas se realiza para las variables de tipo numérico, no para las de tipo factot ('cut', 'color', 'clarity').
+
+Medidas de posición central: media, mediana, moda.
+
+La moda parece no estar implementada como función en R, por lo que se creará la función ad hoc.
+
+```{r}
+moda <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x,ux)))]
+  }
+```
+
+```{r}
+mean_col<-apply(dt2[,c(-2,-3,-4)], 2, mean)
+median_col<-apply(dt2[,c(-2,-3,-4)], 2, median)
+mod_col<-apply(dt2[,c(-2,-3,-4)], 2, moda)
+```
+
+```{r}
+Aprox_Simetria<-(mean_col-median_col)
+```
+
+```{r}
+mean_col
+median_col
+mod_col
+Aprox_Simetria
+```
+
+En esta primera aproximación a un análisis de simetría-en el que no estamos teniendo en cuenta la forma de la distribución: modalidad-, se observa cómo la variable para la que existe una gran divergencia entre media y mediana es 'price'. Asimismo, del signo de la resta se pude intuir qué variables son left-skewed y right-skewed: aquellas cuya resta media-mediana otorgue un valor positivo serán right-skewed. Tan solo 'depth' parece ser left-skewed.
+
+Medidas de posición no central: Q1 y Q3
+
+```{r}
+quartiles_col<-apply(dt2[,c(-2,-3,-4)], 2, quantile, probs=c(0.25, 0.5, 0.75))
+quartiles_col
+```
+
+Medidas de dispersión: desviación típica, rango interquartílico, rango, coeficiente de variación de Pearson.
+
+El coeficiente de variación de Pearson parece no estar implementada como función en R, por lo que se creará la función ad hoc.
+
+```{r}
+CV <- function(x){
+      (sd(x)/abs(mean(x)))
+      }
+```
+
+```{r}
+sd_col<-apply(dt2[,c(-2,-3,-4)], 2, sd)
+IQR_col<-apply(dt2[,c(-2,-3,-4)], 2, IQR)
+Range_col<- apply(dt2[,c(-2,-3,-4)], 2, range)
+CVP_col<-apply(dt2[,c(-2,-3,-4)], 2, CV)
+IQR_col
+Range_col
+sd_col
+CVP_col
+```
+
+El rango no proporciona una medida robusta de la dispersión.
+
+El coeficiente de variación de Pearson proporciona una medida homogénea, y por lo tanto comparable. El coeficiente de variación toma valores entre 0 y 1. Si el coeficiente es próximo a 0, significa que existe poca variabilidad en los datos, y es una muestra muy compacta. En cambio, si tienden a 1 es una muestra muy dispersa.
+
+Las variables con mayor variabilidad son 'carat'y 'price', seguidas de las variables que conforman el volumen del diamante ('x', 'y', 'z'). Debido a esta mayor variabilidad, la relación entre estas variables será especialmente relevante en los apartados 3 y 4. Asimismo, se tendrá en cuenta que las variables con mayor variablidad 'price' y 'carat' tiene un moda muy baja, cercana al valor mínimo. Es decir hay una gran cantidad de diamantes con bajo 'price' y bajo 'carat'. 
+
+Estudio de simetría. La medida de simetría que se utilizará es la incluida en la library 'e1017'; se calcula sobre los momentos centrales segundo y tercero. Intuitivamente, valores negativos indican que la media es inferior a la mediana, por lo que la distribución será left-skewed. Se repiten, en cuanto a signo, los mismos resultados obtenidos con la simple resta media-mediana.
+
+```{r}
+apply(dt2[,c(-2,-3,-4)], 2, skewness)
+```
+
+La medida de curtosis que se utilizará es la incluida en la libary 'e1017'; se calcula sobre los momentos centrales segundo y cuarto. Intuitivamente, valores negativos indican una distribución plana (platicúrtica), valores positivos una distribución apuntada (leptocúrtica). La distribución normal toma una valor de curtosis igual a cero (mesocúrtica).
+
+```{r}
+apply(dt2[,c(-2,-3,-4)], 2, kurtosis)
+```
+
+A continuación, se realizará un estudio gráfico de las distribuciones de las variables. En este apartado se tendrán en cuenta todas las variables, incluidas las de tipo factor.
+
+En primer lugar, gran parte de la información ya incluida puede visualizarse mediante boxplot. Asimimo, se puede detectar visualmente la presencia de outliers. En segundo lugar se incluirán histogramas para visualizar la forma de la distribución (ggplot+geom_histogram)
+
+```{r}
+boxplot(dt2$carat)
+ggplot(data=dt2) + geom_histogram(binwidth=0.05, aes(x=dt2$carat)) + ggtitle("Diamond Carat Distribution") + xlab("Diamond Carat") + ylab("Frequency") + theme_minimal() + xlim(0,3)
+```
+
+'carat' es una variable dependiente de 'x', 'y', y 'z'. Su distribución es rigth-skewed, multimodal,con gran presencia de ouliers. Nótese que se aprecian dos picos, alrededor del primer y tercer cuartil. Se aprecian dos distribuciones right-skewed, la primera hasta el valor carat==1.
+
+```{r}
+boxplot(dt2[,c(8,9,10)])
+ggplot(data=dt2) + geom_histogram(binwidth=0.05, aes(x=dt2$x)) + ggtitle("Diamond Length Distribution") + xlab("Diamond Length") + ylab("Frequency") + theme_minimal()+xlim(3,10)
+ggplot(data=dt2) + geom_histogram(binwidth=0.05, aes(x=dt2$y)) + ggtitle("Diamond Width Distribution") + xlab("Diamond Width") + ylab("Frequency") + theme_minimal()+xlim(3,12)
+ggplot(data=dt2) + geom_histogram(binwidth=0.05, aes(x=dt2$z)) + ggtitle("Diamond Depth Distribution") + xlab("Diamond Depth") + ylab("Frequency") + theme_minimal()+xlim(2,6)
+```
+
+Las tres variables constitutivas del volumen del diamante, y de las que dependen 'carat', 'depth' y 'table' son right-skewed y multimodales. En los tres casos se han eliminado, previamente, valores igual a cero. Presentan ouliers, aunque más extremos en el caso de 'y' y 'z'.
+
+```{r}
+boxplot(dt2$table)
+ggplot(data=dt2) + geom_histogram(binwidth=1, aes(x=dt2$table)) + ggtitle("Diamond Table Distribution") + xlab("Diamond Table") + ylab("Frequency") + theme_minimal()+xlim(50,70)
+```
+
+'table' es una medida relativa de 'y'. 'table' se aproxima a una distribución normal, con valores centrados en el rango 50-70. De los resultados del summary, se puede concluir que es right-skewed. Presenta un elevado número de outliers.
+
+```{r}
+boxplot(dt2$depth)
+ggplot(data=dt2) + geom_histogram(binwidth=0.1, aes(x=dt2$depth)) + ggtitle("Diamond Depth Distribution") + xlab("Diamond Depth") + ylab("Frequency") + theme_minimal()+xlim(50,70)
+```
+
+'depth' es una combinación de 'x', 'y', 'z'. Parece seguir una distribución normal, con valores centrados en el rango 50-70. De los resultados del summary, se puede concluir que es left-skewed. Presenta numerosos outliers.
+
+```{r}
+boxplot(dt2[,c(2,3,4)])
+```
+
+```{r}
+qplot(x = cut, data=dt2)
+```
+
+La distribución de 'cut' está concentrada en valores asociados a mejor calidad, especialmente la categoría de mayor calidad Ideal.
+
+```{r}
+qplot(x = color, data=dt2)
+```
+
+La distribución de 'color' está concentrada en valores asociados a mejor calidad (G a D).
+
+```{r}
+qplot(x = clarity, data=dt2)
+```
+
+De la distribución de 'clarity' se deduce que hay una concentación de las observaciones en valores asociados a peor calidad (SI1 a VS2).
+
+La variable a explicar -y por lo tanto a predecir- es 'price' del diamante. La intuición (ya se vió mediante el coeficiente de variación de Pearson que muestra las variables con mayor variabilidad) indica que 'price' debería estar relacionado con los quilates ('carat') -que dependen de 'x', 'y', 'z'- y de alguna otra variable categórica: 'cut', 'clarity' y/o 'color'. El efecto de 'x', 'y', 'z', 'depth' o 'table' probablemente esté recogido en 'carat'. Esto podría comprobarse con técnicas de reducción de la dimensión como el análisis de componente principales. Este tema, así como las relaciones entre las variables, serán tratados en los apartados 3 y 4.
+
+La distribución de 'price', como la de casi todas las variables de tipo monetario, es highly-skewed, en este caso right-skewed. Se procede a su normalización mediante la transfomación logarítmica.
+
+Como regla general, se trata de escoger una transformación que conduzca a una distribución simétrica, y más cercana a la distribución normal. De este modo, se podrán aplicar numerosas técnicas de inferencia estadística. Para distribuciones right-skewed se usan las transformaciones √x, ln(x) y 1/x, que comprimen los valores altos y expanden los pequeños. La transformación más utilizada es la logarítmica. Muchas distribuciones de datos económicos, o de consumos se convierten en simétricas al tomar la transformación logarítmica.
+
+```{r}
+ggplot(aes(x = log(price)), data = dt2) + ggtitle("Log(price) distribution") + geom_histogram(fill = "blue", color = "grey")
+```
+
+Tras la transfromación logarítmica se consigue una distribución "normal" con dos picos, alrededor del primer y tercer cuartil, coincidiendo con lo observado para la variable 'carat'. Tras la normalización, aparece una distribución bimodal, incluso podrían apreciarse dos distribuciones normales. Es decir, el precio se comporta de forma competitiva hasta un límite -que curiosamente coincide con lo observado en 'carat'-. Pasada esa discontinuidad, el precio se vuelve a comportar de manera competitiva. Parecen existir dos mercado de diamantes, el primero hasta una determinada medida de carat, y el segundo desde una determinada medida de carat. ¿En qué valor de carat se producirá esa discontinuidad? Se va a proceder a realizar un scatter plor de 'price' vs. 'carat'.
+
+```{r}
+ggplot(diamonds,aes(x=carat,y=price))+ geom_point(color='blue',fill='blue')+ xlim(0,quantile(dt2$carat,0.99))+ ylim(0,quantile(dt2$price,0.99))+ggtitle('Diamond Price vs. Carat')
+```
+
+'price' incrementa de forma exponecial con 'carat', pero puede observarse que la variabilidad se acelera cuando 'carat' toma el valor==1. Este parece ser el punto en el que aparecería la discontinuidad. No obstante, esto se tratará con más detalle en los apartados 3 y 4.
+
+En último lugar, se inspeccionará visualmente la normalidad de la distribución de las distintas variables, mediante QQ plots. El gráfico probabilístico normal permite comparar la distribución empírica de un conjunto de datos con la distribución normal. Por tanto, dicho gráfico se puede considerar como una técnica gráfica para la prueba de normalidad de un conjunto de datos.
+
+Para la interpretación de los QQ plots, se pueden seguir estas tres reglas:
+
+-En una distribución right-skewed, los puntos se curvan por encima y a la izquierda de la distribución normal.
+-En una distribución left-skewed, los puntos se curvan por debajo y a la derecha de la distribución normal.
+-Las distribuciones con colas "más estrechas" que la distribución normal, siguen una curva con forma de S, respecto a la distribución teórica normal.
+
+```{r}
+qqnorm(dt2$price) ; qqline(dt2$price)
+```
+
+```{r}
+qqnorm(dt2$carat) ; qqline(dt2$carat)
+```
+
+```{r}
+qqnorm(dt2$table) ; qqline(dt2$table)
+```
+
+```{r}
+qqnorm(dt2$depth); qqline(dt2$depth)
+```
+
+```{r}
+qqnorm(dt2$x); qqline(dt2$x)
+```
+
+```{r}
+qqnorm(dt2$y);qqline(dt2$y)
+```
+
+```{r}
+qqnorm(dt2$z);qqline(dt2$z)
+```
+
+```{r}
+qqnorm(dt2$z);qqline(dt2$z)
+```
+
+A continuación se aplicarán test de normalidad, aunque ha de tenerse en cuenta que:
+
+- Shapiro-test no es aplicable: se utiliza para contrastar la normalidad cuando la muestra es como máximo de tamaño 50.
+- Kolmogorov-S (KS) es muy sensible a valores extremos, como ocurre con casi todas las variables de este data set. En este caso, como se repiten los valores que toman las distintas variables, se obtendrá el mensaje de "ties should not be present for the Kolmogorov-Smirnov test". Podría optrase por tomar valores unicos, mediante el argumento unique(), pero no tendría sentido.
+- Lilliefors corrected K-S test corrige alguna de las debilidad del test KS, de manera, que es más robusto. Se optará por aplicar este último tests para la normalidad.
+
+```{r}
+lillie.test(dt2$price)
+```
+
+Se rechaza la hipótesis nula de normalidad.
+
+```{r}
+lillie.test(dt2$carat)
+```
+
+Se rechaza la hipótesis nula de normalidad.
+
+```{r}
+lillie.test(dt2$x)
+```
+
+Se rechaza la hipótesis nula de normalidad.
+
+```{r}
+lillie.test(dt2$y)
+```
+
+Se rechaza la hipótesis nula de normalidad.
+
+```{r}
+lillie.test(dt2$z)
+```
+
+Se rechaza la hipótesis nula de normalidad.
+
+```{r}
+lillie.test(dt2$table)
+```
+
+Se rechaza la hipótesis nula de normalidad.
+
+```{r}
+lillie.test(dt2$depth)
+```
+
+Se rechaza la hipótesis nula de normalidad.
+
+Tratamiento de outliers
+
+Se definirán los outliers como los elementos (filas) de los datos para los que cualquiera de las variables está por encima del percentil 0.99. No se aplicará una medida más conservadora como n-veces el rango intercuatílico, ya que en el mercado de diamantes se considera cada pieza como única e individualizable -incluso hay diamantes que tienen nombre propio-, por lo que debería aceptarse una gran variabilidad de precios, incluso en función de variables inobservables, es decir, no recogidas en este data set. En términos de Perogrullo, en el caso de los diamantes, los ouliers, no son tan atípicos. 
+
+Se procederá a identificar estos outliers y a eliminarlos del dataframe.
+
+En primer lugar, se construye una función para la identificación de outliers, y se utiliza para la identificación de outliers en el df dt2, del que se excluyen las variables de tipo factor: 'cut', 'color', 'clarity'. La función identifica para cada una de las variables, la fila que contiene un outlier.
+
+```{r}
+findOutlier <- function(data) {
+    ## Calcula percentil 0.99
+     ex <- apply(data, 2, quantile, probs=c(0.99))
+    result <- mapply(function(d, s) {
+        which(d > s)
+    }, data, ex)
+    result
+}
+
+outliers <- findOutlier(dt2[,c(-2,-3,-4)])
+outliers
+```
+
+En segundo lugar, se eliminan aquellas filas que contienen outliers.
+
+```{r}
+removeOutlier <- function(data, outliers) {
+    result <- mapply(function(d, o) {
+        res <- d
+        res[o] <- NA
+        return(res)
+    }, data, outliers)
+    return(as.data.frame(result))
+}
+diamonds_F <- removeOutlier(dt2, outliers)
+diamonds_f <-na.omit(diamonds_F)
+```
+
+En total se han eliminado 879 filas.
+
+Se va a proceder a ordenar, de nuevo, las variables categóricas.
+
+```{r}
+diamonds_fc <-diamonds_f %>% mutate (cut=ifelse(diamonds_f$cut==1,"Fair",
+             ifelse(diamonds_f$cut==2,"Good",
+                    ifelse(diamonds_f$cut==3,"Very Good",
+                           ifelse(diamonds_f$cut==4,"Premium", 
+                                   ifelse(diamonds_f$cut==5,"Ideal", "")))))) %>% mutate(color=ifelse(diamonds_f$color==1,"J",
+             ifelse(diamonds_f$color==2,"I",
+                    ifelse(diamonds_f$color==3,"H",
+                           ifelse(diamonds_f$color==4,"G", 
+                                   ifelse(diamonds_f$color==5,"F", 
+                                          ifelse(diamonds_f$color==6,"E",
+                                                 ifelse(diamonds_f$color==7,"D","")))))))) %>% mutate(clarity=ifelse(diamonds_f$clarity==1,"I1",
+             ifelse(diamonds_f$clarity==2,"SI1",
+                    ifelse(diamonds_f$clarity==3,"SI2",
+                           ifelse(diamonds_f$clarity==4,"VS1", 
+                                   ifelse(diamonds_f$clarity==5,"VS2", 
+                                          ifelse(diamonds_f$clarity==6,"VVS1",
+                                                 ifelse(diamonds_f$clarity==7,"VVS2", "IF"                                                     ))))))))
+```
+
+```{r}
+diamonds_fc$color <-ordered(diamonds_fc$color, levels=c("J", "I", "H", "G", "F", "E", "D"))
+diamonds_fc$clarity <- ordered(diamonds_fc$clarity, levels = c("I1", "SI1", "SI2", "VS1", "VS2", "VVS1", "VVS2", "IF"))
+diamonds_fc$cut <- ordered(diamonds_fc$cut, levels=c("Fair", "Good", "Very Good", "Premium", "Ideal"))
+```
+
+1. Muestra representativa de la variable 'cut'.
+
+El muestreo aleatorio estratificado es un tipo de muestreo que intenta asegurar que la muestra presenta la misma distribución que la población en relación a determinadas variables, previniendo la aparición de sesgos debidos a las mismas.
+
+Como ya se ha mencionado, la variable dependiente -la que se pretende explicar y predecir- es 'price'. El muestro estratificado en función de la variable 'cut, tendrá sentido si las subpoblaciones son muy heterogéneas en relación a la variable 'price'. Tras la estratificación se procederá a relizar un análisis ANOVA o, en caso de incumplimiento de los requisitos para la aplicación de ANOVA, otro tipo de contraste no paramétrico.
+
+Se va a realizar un muestreo estratificado con afijación proporcional.
+
+En primer lugar, se calcularán las proporciones por estrato.
+
+```{r}
+estratos <-diamonds_fc  %>% group_by(cut) %>%
+  summarise(n=n(), s=sd(price)) %>% mutate (p=n/sum(n))
+estratos
+```
+
+En el dataframe estratos se obtendrán no sólo las proporciones para cada uno de los estratos de 'cut', sino también el número de observaciones -poblaciones- de cada estrato y la desviación típica de la variable 'price'. 
+
+En segundo lugar, se asigna la muestra de manera proporcional a los estratos, es decir, se va a optar por afijación proporcional -otras opciones serían óptima o Neyman-.
+
+Se podría calcular el tamaño de la muestra mediante una función que permitiera fijar el tipo de error (absoluto o relativo) así como el alpha. Esto quedaría fuera del ámbito del ejercicio. Se constuirá una muestra estratificada del 10% de la población. Cuanto mayor sea la muestra menor es la variabilidad de los estimadores poblacionales y, por lo tanto, mejores serán las estimaciones. 
+
+```{r}
+nstrata<-function(n,wh){
+    nh<-ceiling(n*wh)
+    return(nh)
+}
+```
+
+
+```{r}
+nsizeProp<-nstrata(n=5000,wh=estratos[,4])
+nsizeProp
+```
+
+A continuación, se procederá a hacer un muestreo aleatorio en cada uno de los estratos según el número de observaciones establecido por nsizeProp
+
+```{r}
+diamonds1<- diamonds_fc[diamonds_fc$cut=="Fair",]
+mas=sample(1:nrow(diamonds1), round(nsizeProp[[1,1]]), replace=FALSE)
+diamonds1<-diamonds1[mas,]
+```
+
+```{r}
+diamonds2<- diamonds_fc[diamonds_fc$cut=="Good",]
+mas=sample(1:nrow(diamonds2), round(nsizeProp[[2,1]]), replace=FALSE)
+diamonds2<-diamonds2[mas,]
+```
+
+```{r}
+diamonds3<- diamonds_fc[diamonds_fc$cut=="Very Good",]
+mas=sample(1:nrow(diamonds3), round(nsizeProp[[3,1]]), replace=FALSE)
+diamonds3<-diamonds3[mas,]
+```
+
+```{r}
+diamonds4<- diamonds_fc[diamonds_fc$cut=="Premium",]
+mas=sample(1:nrow(diamonds4), round(nsizeProp[[4,1]]), replace=FALSE)
+diamonds4<-diamonds4[mas,]
+```
+
+```{r}
+diamonds5<- diamonds_fc[diamonds_fc$cut=="Ideal",]
+mas=sample(1:nrow(diamonds5), round(nsizeProp[[5,1]]), replace=FALSE)
+diamonds5<-diamonds5[mas,]
+```
+
+```{r}
+sample_s_cut<-rbind(diamonds1,diamonds2,diamonds3,diamonds4,diamonds5)
+dim(sample_s_cut)
+table(sample_s_cut$cut)
+```
+
+Antes de la aplicación de ANOVA u otro tipo de contraste para comprobrar la igualdad de medias, se va a relizar un análisis gráfico mediante el uso de boxplots.
+
+```{r} 
+plot(sample_s_cut$price~sample_s_cut$cut)
+```
+
+Observamos que las cajas correspondientes a los distintos cuts están prácticamente superpuestas, especialmente pata los cortes 'Fair', 'God', y 'Very Good'. El valor mediano de cada uno de estos tres cuts está a un nivel interno dentro de las cajas de resto de cuts. Este criterio se utiliza para comparar grupos y en este caso parece indicar que hay homogeneidad o que no hay diferencias significativas en ese grupo de medias. 
+
+No obstante, se  va a proceder a realizar un ANOVA de igualdad de medias en cada uno de los estratos. El análisis de la varianza permite contrastar la hipótesis nula de que las medias de K poblaciones (K >2) son iguales, frente a la hipótesis alternativa de que por lo menos una de las poblaciones difiere de las demás en cuanto a su valor esperado. El ANOVA requiere el cumplimiento los siguientes supuestos:
+
+1. Las poblaciones (distribuciones de probabilidad de la variable dependiente correspondiente a cada factor) son normales.
+2. Las K muestras sobre las que se aplican los tratamientos son independientes.
+3. Las poblaciones tienen todas igual varianza (homoscedasticidad).
+
+```{r}
+samplecut.aov=aov(price~cut,sample_s_cut)
+summary(samplecut.aov)
+plot(samplecut.aov)
+```
+
+Para comprobar si se cumplen las asunciones que permite la aplicación de ANOVA, se conducirá un test de homogeneidad de la varianza (bartlett.test) y se inspeccionarán visualmente los plots del modelo (residulas vs. fitted, normal QQ de los standarized residuals, standarized vs. fitted values- sacle location .
+
+```{r}
+bartlett.test(price ~ cut, data=sample_s_cut)
+```
+
+El p-value del contraste (6.558e-14) es significativo por lo que no se puede asumir que las varianzas sean iguales.
+
+Mediante la representación gráfica de los residuos frente a los valores predichos por el modelo (que son las medias), se puede observar la existencia de patrones. Idealmente, debería de mostrar scatter iguales para cada una de las condiciones del factor 'cut' Se observan residuos de distinto tamaña para los ditintos tipos de  'cut', es decir, estamos en presendia de heterocedasticidad. De nuevo, no parece apropiado la aplicación de ANOVA. 
+
+El segundo gráfico muestra el llamado QQ-plot, en el que se comparan las distribuciones de los residuos concretos de nuestros datos, con los que se obtendrían si la muestra se ajustara a una distribución normal. Si las hipótesis del modelo se verifican, en este gráfico se espera ver aparecer una nube de puntos situados muy proximamente a lo largo de la curva. Como puede apreciarse,no es exactamente una recta, lo que sugiere que pueda tenerse algún problema con la hipótesis de normalidad. 
+
+Por otro lado, el contraste ANOVA es relativamente robusto frente a las desviaciones pequeñas de la normalidad, siempre y cuando las demás hipótesis del modelo se mantengan, y en particular cuando las varianzas de las poblaciones sean homogéneas y todas las muestras sean del mismo tamaño. En este ejemplo, esa segunda condición no se cumple. 
+
+Se pasará a otro tipo de contrastes no paramétricos que no dependen de la hipótesis homogeneidad de varianzas y normalidad en la misma medida en que lo hace ANOVA. Se añade un resumen de los test:
+
+Pruebas paramétricas y no paramétricas
+- Dos grupos independientes. Paramétrico:	t independiente, Ordinal:	Mann-Whitney, Categórico: Exacto de Fiseher
+- Dos grupos dependientes. Paramétrico:	t dependiente, Ordinal:	Wilcoxon, Categórico: McNemar
+- Dos o más grupos independientes. Paramétrico:	ANOVA de una vía, Ordinal:	Kruskal-Wallis, Categórico:	Chi-cuadrado
+- Dos o más grupos dependiente. Paramétrico:ANOVA medidas repetidas., Ordinal:	Friedman, Categórico:	Q de Cochran
+
+Se testeará la independencia:
+
+```{r}
+#contraste de independencia chisq
+tbl=table(sample_s_cut$price, sample_s_cut$cut)
+chisq.test(tbl)
+```
+
+En este caso, como el p-valor es menor a 0.05 se rechaza la hipótesis nula de que las variables no guardan relación entre sí. No obstante, en muestras grandes, como la de este ejercicio, este test no suele funcionar bien.
+
+Se comprobará la hipótesis nula -ígualdad de medias- mediante  mediante un kruskal test (que no exige ni igualdad de medias ni normalidad, aunque sí independencia).
+
+```{r}
+kruskal.test(price ~cut, data=sample_s_cut)
+```
+
+Cuando este test nos devuelve resultados significativos, como es el caso, quiere decir que, en al menos dos grupos, hay diferencias pero no sabemos en cuáles de ellos (ni cuántas hay). Para saber qué grupos difieren entre sí se utilizan pruebas post-hoc (comparaciones dos a dos controlando la significación). Para ello utilizaremos el test de Wilconson pairwise.
+
+```{r}
+pairwise.wilcox.test(sample_s_cut$price, sample_s_cut$cut, p.adjust = "bonferroni", exact = FALSE )
+```
+
+Las diferencias parecen existir entre el corte 'Ideal' y 'Premium' en menor medida, y el resto de cortes (como se vio en los boxplots).
+
+
+2. Análisis de las variables descriptivas.
+
+A partir de este punto, se trabajará con la muestra estrificada, no con la población.
+
+Este análisis ya se ha realizado para el total de la población en el apartado 0, por lo que es prescindible. Las conclusiones son exactamente las mismas, lo que está indicando que la muestra es representativa de la población. 
+
+No obstante, se procederá a repetir parte de la estadística descriptiva, intentando modificar funciones y gráficos ya utilizados. El tratamiento de casos atípicos se realizó a nivel poblacional. Asimimo, se eliminaron aquellas observaciones en las que las variables constitutuivas del volumen ('x', 'y', 'z') tomaban el valor = 0.
+
+```{r}
+summary(sample_s_cut)
+```
+
+El análisis descriptivo básico de las variables incluye: medidas de posición central, medidas de posición no central y medidas de dispersión. Este análisis de medidas se realiza para las varaibles de tipo numérico, no para las de tipo factot('cut', 'color', 'clarity').
+
+Medidas de posición central: media, mediana, moda.
+
+La moda no está implementada como función en R, por lo que se creó la función ad hoc.
+
+```{r}
+mean_colcut<-apply(sample_s_cut[,c(-2,-3,-4)], 2, mean)
+median_colcut<-apply(sample_s_cut[,c(-2,-3,-4)], 2, median)
+moda_colcut<-apply(sample_s_cut[,c(-2,-3,-4)], 2, moda)
+```
+
+```{r}
+Aprox_Simetriacut<-(mean_colcut-median_colcut)
+```
+
+```{r}
+mean_colcut
+median_colcut
+moda_colcut
+Aprox_Simetriacut
+```
+
+En esta primera aproximación a un análisis de simetría-en el que no estamos teniendo en cuenta la forma de la distribución: modalidad-, podemos observar cómo varía la simetía de la muestra respecto a la de la población. Los valores son cercanos a cero. Hay que recordar que en aquellas muestras que tengan más de 30 casos, las medias muestrales por el Teorema Central del Límite, se distribuyen en el muestro normalmente. Hay que distinguir la normalidad de la media muestral en le muestreo de la normlidad de la variables.
+
+Medidas de posición no central: Q1 y Q3
+
+```{r}
+quartiles_colcut<-apply(sample_s_cut[,c(-2,-3,-4)], 2, quantile, probs=c(0.25, 0.5, 0.75))
+quartiles_colcut
+```
+
+Medidas de dispersión: desviación típica, rango interquartílico, rango, coeficiente de variación de Pearson.
+
+El coeficiente de variación de Pearson no está implementada como función en R, por lo que se creó la función ad hoc.
+
+```{r}
+sd_colcut<-apply(sample_s_cut[,c(-2,-3,-4)], 2, sd)
+IQR_colcut<-apply(sample_s_cut[,c(-2,-3,-4)], 2, IQR)
+Range_colcut<- apply(sample_s_cut[,c(-2,-3,-4)], 2, range)
+CVP_colcut<-apply(sample_s_cut[,c(-2,-3,-4)], 2, CV)
+IQR_colcut
+Range_colcut
+sd_colcut
+CVP_colcut
+```
+
+El rango no proporciona una medida robusta de la dispersión.
+
+El coeficiente de variación de Pearson proporciona una medida homogénea, y por lo tanto comparable. El coeficiente de variación toma valores entre 0 y 1. Si el coeficiente es próximo al 0, significa que existe poca variabilidad en los datos y es una muestra muy compacta. En cambio, si tienden a 1 es una muestra muy dispersa.
+
+Las variables con mayor variabilidad, de nuevo, son 'carat', 'price', seguidas de las variables que conforman el volumen del diamante ('x', 'y', 'z').
+
+Estudio de simetría. La medida de simetría que se utilizará es la incluida en la library 'e1017', y se calcula sobre los momentos centrales segundo y tercero. Intuitivamente, valores negativos indican que la media es inferior a la mediana, por lo que la distribución será left-skewed. Se repiten, en cuanto a signo, los mismos resultados obtenidos con la simple resta media-mediana.
+
+```{r}
+apply(sample_s_cut[,c(-2,-3,-4)], 2, skewness)
+```
+
+La medida de curtosis que se utilizará es la incluida en la libary 'e1017', y se calcula sobre los momentos centrales segundo y cuarto. Intuitivamente, valores negativos indican una distribución plana (platicúrtica), valores positivos una distribución apuntada (leptocúrtica). La distirbucón normal toma una volor de custosis igual a cero (mesocúrtica).
+
+```{r}
+apply(sample_s_cut[,c(-2,-3,-4)], 2, kurtosis)
+```
+
+No se aplicará ningún test de normalidad (Shapirro,KS) ya que son muy sensibles en caso de grandes muestras.
+
+A continuación, se relizará un estudio gráfico de las distribuciones de las variables. En este apartado se tendrán en cuenta todas las variables, incluidas las de tipo factor.
+
+En primer lugar, gran parte de la información ya incluido puede visualizarse mediante boxplot. Asimimo, se puede detectar visualmente la presencia de outliers. Se incluyen gráficos de densidad para poder observar la forma de la distribución.
+
+```{r}
+plot(density(sample_s_cut$price))
+boxplot(sample_s_cut$price)
+```
+
+```{r}
+boxplot(sample_s_cut[,c(2,3,4)])
+```
+
+```{r}
+plot(density(sample_s_cut$table))
+boxplot(sample_s_cut$table)
+```
+
+```{r}
+plot(density(sample_s_cut$depth))
+boxplot(sample_s_cut$depth)
+```
+
+```{r}
+plot(density(sample_s_cut$x))
+plot(density(sample_s_cut$y))
+plot(density(sample_s_cut$z))
+boxplot(sample_s_cut[,c(8,9,10)])
+```
+
+```{r}
+boxplot(dt2[,c(7)])
+```
+
+```{r}
+qplot(x =cut, data=sample_s_cut)
+```
+
+De la distribución de 'cut' se mantiene la concentación de las observaciones en valores asociados a mejor calidad, especialmente la categoría de mayor calidad Ideal, ya que se ha realizado un muestreo estratificado.
+
+```{r}
+qplot(x = color, data=sample_s_cut)
+```
+
+De la distribución de 'color' se mantiene la concentación de las observaciones en valores asociados a mejor calidad (G a D).
+
+```{r}
+qplot(x = clarity, data=sample_s_cut)
+```
+
+De la distribución de 'clarity' se deduce que hay una concentación de las observaciones en valores asociados a peor calidad (SI1 a VS2).
+
+En último lugar, se inspeccionará visualmente la normalidad de la distribución de las distintas variables, mediante QQ plots. El gráfico probabilístico normal permite comparar la distribución empírica de un conjunto de datos con la distribución normal. Por tanto, dicho gráfico se puede considerar como una técnica gráfica para la prueba de normalidad de un conjunto de datos.Para su interpretación, se pueden aplicar las mismas reglas mencionadas en el apratdo 0.
+
+```{r}
+qqnorm(sample_s_cut$price); qqline(sample_s_cut$price)
+```
+
+```{r}
+qqnorm(sample_s_cut$carat); qqline(sample_s_cut$carat)
+```
+
+```{r}
+qqnorm(sample_s_cut$table); qqline(sample_s_cut$table)
+```
+
+```{r}
+qqnorm(sample_s_cut$depth); qqline(sample_s_cut$depth)
+```
+
+```{r}
+qqnorm(sample_s_cut$x); qqline(sample_s_cut$x)
+```
+
+```{r}
+qqnorm(sample_s_cut2$y); qqline(sample_s_cut2$y)
+```
+
+```{r}
+qqnorm(sample_s_cut2$z); qqline(sample_s_cut$z)
+```
+
+Las conclusiones son las mismas que las alcanzadas en el aparatdo 0. Ello también nos estará indicando que la muetra obtenida es representativa de la población. 
+
+3. Inferencia
+
+- Cálculo un intervalo de confianza para la media de 'carat' y 'depth' (inferencia univariante)
+- Formulación un test de hipótesis sobre el parámetro 
+
+Para el cálculo de intervalos de confianza se va a trabajar con la muestra estratificada. Se va calcular un intervalo de confianza para la media poblacional de 'carat' y 'depth' (mu) dado que se conoce la varianza poblacional y sabemos que tanto 'carat' como 'depth' no siguen, a nivel poblacional, una distribución normal. Esto se dedujo de lo QQ plots y de los tets de normalidad.
+
+- Carat: media poblacional= 0.7976983,desviación típica poblacional= 0.4737953, CVP= 0.59395302, simetría positiva lo que indica que la distribucion es left-skewed -aunque tiene muchos picos y no es unimodal-, curtosis ligeramente positiva.
+
+- Depth: media poblacional= 61.7495141,desviación típica poblacional= 1.4323311, CVP=0.02319583, simetría ligeramente positiva, muy cercana a cero -, curtosis positiva ya que la distibucion es apuntada -leptocúrtica-.
+
+Construcción del estadístico de la media 'carat'- asumiendo que 'carat' no sigue una distribución normal y que conociendo la destiacción típica poblacional-. 
+
+```{r}
+n<-nrow(sample_s_cut)
+mean_sample_carat<-mean_colcut[[1]]
+mean_pop_carat <-mean_col[[1]]
+sd_pop_carat <- sd_col[[1]]
+# Tipificando la media muestral de carat, el estadístico:
+estat_media_carat <- (mean_pop_carat-mean_sample_carat) /((sd_pop_carat/sqrt(n)))
+```
+
+Construcción del intervalo de confianza del estadístico de la media de 'carat' con probibilidad 0,95. La media muestral por el teorema central del límite se va a aproximar la distribución normal. Por lo tanto, el intervalo de confianza del 95% para la 'carat' media de toda la población de diamantes es:
+
+```{r}
+ICc1 <-(mean_sample_carat-1.96*((sd_pop_carat)/(sqrt(n))))
+ICc2 <-(mean_sample_carat+1.96*((sd_pop_carat)/(sqrt(n))))
+ICc <-c(ICc1,ICc2)
+```
+
+Construcción del estadístico de la media 'depth'- en este caso se podría asumir que 'depth' sigue una distribución normal, aunque como la muestra incluye más de 30 observaciones, los estadísticos e intervalos de confianza siguen el mismo diseño; se conoce la desviación típica poblacional-.
+
+Depth: media poblacional= 61.7495141,desviación típica poblacional= 1.4323311, CVP=0.02319583, simetría ligeramente positiva, muy cercana a cero -, curtosis positiva ya que la distibucion es apuntada -leptocúrtica-.
+
+```{r}
+n<-nrow(sample_s_cut)
+mean_sample_depth<-mean_colcut[[2]]
+mean_pop_depth <-mean_col[[2]]
+sd_pop_depth <- sd_col[[2]]
+# Tipificando la media muestral de depth, el estadístico:
+estat_media_depth <- (mean_pop_depth-mean_sample_depth) /((sd_pop_depth/sqrt(n))) 
+```
+
+Construcción del intervalo de confianza del estadístico de la media de 'depth' con probibilidad 0.95.
+
+```{r}
+ICd1 <-(mean_sample_depth-1.96*((sd_pop_depth)/(sqrt(n))))
+ICd2 <-(mean_sample_depth+1.96*((sd_pop_carat)/(sqrt(n))))
+ICd <-c(ICd1,ICd2)
+```
+
+Alternativamente se podría utilizar la función t.test 
+
+```{r}
+t.test(sample_s_cut$carat)
+```
+
+```{r}
+t.test(sample_s_cut$depth)
+```
+
+Para la formulación del test de hipótesis, repetimos lo realizado en el apartado 2.
+
+Se pasará a otro tipo de contrastes no paramétricos que no dependen de las hipótesis de normalidad y homogeneidad de varianzas en la misma medida en que lo hace ANOVA. Se va a optar por oneway.test.
+
+```{r}
+oneway.test(price~cut,sample_s_cut)
+```
+
+El p-valor  (5.715e-09) del  contraste es extremadamente pequeño. Así que se puede rechazar la hipótesis nula, concluir que las medias de precios son distintas.
+
+Una vez rechazada la hipótesis nula, se tratará de comparar por parejas las medias.
+
+```{r}
+pairwise.t.test(sample_s_cut$price,sample_s_cut$cut, p.adj="bonferroni")
+```
+
+Contraste poblacional. Se va a relizar un constraste a nivel poblacional que podría resultar de gran interés para la respuesta del apartado 4. Se va a estudiar si para valores de 'carat'<1, variable que se utilizará para segmentar la población, el precio de uno u otro grupo es, en media, distinto.
+
+```{r}
+SmallDiamonds<-dt2[dt2$carat<1,]
+BigDiamonds<-dt2[dt2$carat>=1,]
+summary(SmallDiamonds)
+summary(BigDiamonds)
+```
+
+```{r}
+t.test(SmallDiamonds$price, BigDiamonds$price)
+```
+
+El p-value es muy pequeno, por lo que se rechaza la hipótesis de igualad de media de precios para 'carat'<1. Este es un resultado que confirma lo observado en apartados anteriores. 
+
+3. Relaciones entre las variables
+
+- Mostrar las relaciones que existen entre variables (dependencia, anova, correlación)
+
+Se parte de la hipótesis que 'price' es la variable dependiente o a explicar. Se intentará buscar una relación entre variables basadas en comportamientos de oferta y demanda -que pueden explicar la discontinuidad observada en la variable 'price'-. Esto se explicó con mayor detalle en el apartado 0.
+
+Por el lado de la oferta, se deberían estudiar variables constitutivas de la "calidad" de un diamante: numéricas y categóricas. Por el lado de la demanda, discontinuidades en el precio en función de las distintas variables mencionadas. Asimimo sera de gran interés estudiar la elasticididad de la variable precio, frente a modificaciones en las caracterísiticas del diamante (especialmente carat). 
+
+Se procederá a analizar la variable price, que es la variable dependiente. Como ya se vió previamente es right-skewed por lo que se procederá a su transformación logarítimica. La distribución de la mayoría de las variables monetarias es altamente skewed, y sufren discontinuidades en función de la cantidad, tal y como ocurre con 'price' en función de 'carat'. Estas discontinudidades pueden relacionarse, especialmente en el caso de productos caros y que no se adquieren de manera reiterada (quizá una o pocas veces en la vida de un consumidor) con la distribuciones de consumidores en función de la renta disponible (pocos consumidores ricos).
+
+```{r}
+plot1 <- ggplot(sample_s_cut,aes(x=price))+
+  geom_histogram(color='blue',fill = 'blue',binwidth=100)+
+  scale_x_continuous(breaks=seq(300,19000,1000),limit=c(300,19000))+
+  ggtitle('Price')
+plot2 <- ggplot(sample_s_cut,aes(x=price))+
+  geom_histogram(color='red',fill='red',binwidth=0.01)+
+  scale_x_log10(breaks=seq(300,19000,1000),limit=c(300,19000))+
+  ggtitle('Price(log10)')
+grid.arrange(plot1,plot2,ncol=2)
+```
+
+Tras la normalización se consigue una distribución "normal" con dos picos, alrededor del primer y tercer cuartil.
+
+ggpairs nos permitirá analizar la posible dependencia entre las variables, así como la correlación. Partiendo de la muestra seleccionada, se utilizará ggpairs para encontrar las relaciones pair-wise entre las distintas variables. Se tratará de manera separada, las variables numéricas y las variables categóricas.
+
+```{r}
+ggpairs(sample_s_cut[,c(-2,-3,-4,-11,-12)])
+```
+
+De esta colección de gráficos y correlaciones se puede deducir que:
+
+ -el peso, es decir, la variable 'carat' se relaciona de manera positiva (correlación 0.93) con 'price'. No obstante, del scatterplot se puede deducir que, en primer lugar, la relación no es de tipo lineal (por lo que, si no se procede a realizar transformaciones en las variables, la modelización lineal no sería una buena opción) y, en segundo lugar, que la dispersión entre las dos variables incrementa a medida que incrementa c'arat'. Como ya se mencionó en el apartado cero, el punto crítico es carat=1. 
+ 
+- 'carat' es un función de 'x', 'y' 'z' y como como es lógico, se relaciona de manera positiva (correlaciones superiores a 0.98) con las medidas constitutivas del volumen. Al ser una función del volumen del diamante (x*y*z) puede ser acertado realizar una transformación mediante una función de raíz cúbica. Es decir, 'carat'=f(x*y*z), por lo que puede ser de gran interés para la modelización, realizar la siguiente transformación: 'carat'^(1/3)
+
+ -se aprecia una correlación lineal positiva (correlaciones superiores a 0.88) entre 'price' y las medidas determinantes del volumen: 'x', 'y', 'z' (esta relación se repite, por lo tanto, entre 'price' y volumen).
+ 
+ - 'price' no parece estar directamente relacionado de manera lineal con 'depth' y 'table'.
+ 
+Mediante un scatterplot, se analizará la posible relación entre una medida transformada (raíz cúbica) de 'carat' y 'price' (en transformación logarítmica).
+
+Repetimos lo ya explicado en el punto 0: Tras la normalización de 'price' se consigue una distribución "normal" con dos picos, alrededor del primer y tercer cuartil, coincidiendo con lo observado para la variable 'carat'. Tras la normalización, aparece una distribución bimodal, incluso podrían apreciarse dos distribuciones normales. Es decir, el precio se comporta de forma competitiva hasta un límite -que curiosamente coincide con lo observado en 'carat'-. Pasada esa discontinuidad, el precio se vuelve a comportar de manera competitiva. Parecen existir dos mercado de diamantes, el primero hasta una determinada medida de carat, y el segundo desde una determinada medida de carat. ¿En qué valor de carat se producirá esa discontinuidad? La respuesta era carat=1. En este punto, se continuará con la tranaformación logarítimica de 'price' y se añadirá la transformación raíz-cúbica de 'carat'.
+
+```{r}
+### Creacion de una nueva función de transformación para carat
+cuberoot_trans = function() trans_new('cuberoot',
+                                      transform = function(x) x^(1/3),
+                                      inverse = function(x) x^3)
+```   
+
+```{r}
+### Trasnformación ya realizada en el partado 0 de la varaible 'price'
+log10_trans = function() trans_new('log10',
+                                      transform = function(x) log10(x),
+                                      inverse = function(x) exp(x))
+```
+
+```{r}
+ggplot(aes(carat, price), data = sample_s_cut) + 
+  geom_point(color='blue',fill='blue',alpha=1/2,size=1,position = 'jitter') + 
+  scale_x_continuous(trans = cuberoot_trans(), limits = c(0.2, 3),
+                     breaks = c(0.2, 0.5, 1, 2, 3)) + 
+  scale_y_continuous(trans = log10_trans(), limits = c(350, 15000),
+                     breaks = c(350, 1000, 5000, 10000, 15000)) +
+  ggtitle('Price (log10) by Cube-Root of Carat')
+``` 
+
+La transformción logarítmica de 'price' es una función casi lineal de la transformación raiz cúbica de carat. 
+
+Variables categóricas
+
+```{r}
+ggpairs(sample_s_cut[,c(2,3,4,7)])
+```
+
+A continuación se estudiara mediante scatterplot, el valor añadido explicativo que las variables categóricas pueden aportar.Se utlizarán distintas tonalidades para los valores de las variables categóricas.
+
+```{r}
+attach(sample_s_cut)
+```
+
+
+```{r}
+ggplot(aes(x = carat, y = price), data = sample_s_cut) + 
+  geom_point(alpha = 0.5, size = 1, position = 'jitter',aes(color=clarity)) +
+  scale_color_brewer(type = 'div',
+    guide = guide_legend(title = 'Clarity', reverse = T,
+    override.aes = list(alpha = 1, size = 2))) +                         
+  scale_x_continuous(trans = cuberoot_trans(), limits = c(0.2, 3),
+    breaks = c(0.2, 0.5, 1, 2, 3)) + 
+  scale_y_continuous(trans = log10_trans(), limits = c(350, 15000),
+    breaks = c(350, 1000, 5000, 10000, 15000)) +
+  ggtitle('Price (log10) by Cube-Root of Carat and Clarity')
+```
+
+Del scatterplot se puede deducir claramente que, dado un valor de 'carat','clarity' es una variable determinante del precio.
+
+```{r}
+ggplot(aes(x = carat, y = price), data = sample_s_cut) + 
+  geom_point(alpha = 0.5, size = 1, position = 'jitter',aes(color=cut)) +
+  scale_color_brewer(type = 'div',
+    guide = guide_legend(title = 'Cut', reverse = T,
+    override.aes = list(alpha = 1, size = 2))) +                         
+  scale_x_continuous(trans = cuberoot_trans(), limits = c(0.2, 3),
+    breaks = c(0.2, 0.5, 1, 2, 3)) + 
+  scale_y_continuous(trans = log10_trans(), limits = c(350, 15000),
+    breaks = c(350, 1000, 5000, 10000, 15000)) +
+  ggtitle('Price (log10) by Cube-Root of Carat and Cut') 
+``` 
+
+Gráficamente no se puede apreciar una relación, tan clara, de 'cut' en el precio del diamante. No obstante, se observa que para un nivel de 'carat', los diamantes con mejor 'cut' tienen un mayor precio. Por lo tanto, esta variable debería de tenerse en cuenta en el análisis explicativo del precio.
+
+```{r}
+ggplot(aes(x = carat, y = price), data = sample_s_cut) + 
+  geom_point(alpha = 0.5, size = 1, position = 'jitter',aes(color=color)) +
+  scale_color_brewer(type = 'div',
+    guide = guide_legend(title = 'Color', reverse = F,
+    override.aes = list(alpha = 1, size = 2))) +                         
+  scale_x_continuous(trans = cuberoot_trans(), limits = c(0.2, 3),
+    breaks = c(0.2, 0.5, 1, 2, 3)) + 
+  scale_y_continuous(trans = log10_trans(), limits = c(350, 15000),
+    breaks = c(350, 1000, 5000, 10000, 15000)) +
+  ggtitle('Price (log10) by Cube-Root of Carat and Color')
+``` 
+
+De nuevo, se aprecia una relación clara entre el 'color' del diamante y el 'price'.
+
+Análisis ANOVA. El análisis de la varianza permite contrastar la hipótesis nula de que las medias de K poblaciones (K >2) son iguales, frente a la hipótesis alternativa de que por lo menos una de las poblaciones difiere de las demás en cuanto a su valor esperado. El ANOVA requiere el cumplimiento los siguientes supuestos:
+
+1. Las poblaciones (distribuciones de probabilidad de la variable dependiente correspondiente a cada factor) son normales.
+2. Las K muestras sobre las que se aplican los tratamientos son independientes.
+3. Las poblaciones tienen todas igual varianza (homoscedasticidad).
+
+El análisis ANOVA se incorpora en el aparatado 4.
+
+4. Análisis de regresión
+- Formular un modelo de regresión y analizar los resultados
+- Mostrar los residuos y analiza los resultados
+- Aplicar una transformación a la regresión y analisis de los resultados
+- Interpretación de los coeficientes estandarizados de la regresión
+
+Parte del trabajo solicitado en esta último apartado ya se ha realizado en la sección 3: se han aplicado transformaciones a las variables para conseguir relaciones de tipo lineal. 
+
+Se van a realizar distintas regresiones lineales mediante la función lm(), en las que se irán incorporando las variables de tipo factor. En el segundo modelo (m2) se incorpora la variable 'carat' junto a su transformación para predecir el logaritmo de 'price', asumiendo que  la relación entre 'price' y 'carat' no se explica totalmente mediante la transformación de 'carat' mediante la función cube root. Como puede apreciarse el modelo mejora. 
+
+En m3, m4 y m5 se incoporan sucesivamete 'cut', 'color' y 'clarity'. Estas variables de tipo factor se incorporan a la regresión sin transformación a matriz de dummies, gracias el argumento contrast. En la ayuda se puede comprobar: "A list, whose entries are values (numeric matrices or character strings naming functions) to be used as replacement values for the contrasts replacement function and whose names are the names of columns of data containing factors.
+
+```{r}
+m1 <-lm(formula = I(log10(price)) ~ I(carat^(1/3)), data = sample_s_cut)
+m2 <-lm(formula = I(log10(price)) ~ I(carat^(1/3)) + carat, data = sample_s_cut)
+m3 <-lm(formula = I(log10(price)) ~ I(carat^(1/3)) + carat + cut, data = sample_s_cut)
+m4 <-lm(formula = I(log10(price)) ~ I(carat^(1/3)) + carat + cut + color, data = sample_s_cut)
+m5 <-lm(formula = I(log10(price)) ~ I(carat^(1/3)) + carat + cut + color + clarity, data = sample_s_cut)
+``` 
+
+```{r}
+mtable(m1,m2,m3,m4,m5)
+``` 
+
+Los adj. R-squared son muy altos, lo que implica que los modelos son capaces de explicar gran parte de la variabilidad en 'price'.
+
+El modelo podría ser el siguiente:
+log(price)=0.18+3.97carat `(1/3) -0.747carat+pc5*cut_coef+pc7*color+coef+pc8*clarity_coef
+pc5, pc7 y pc8 son contastes polinómicos con n=5,7,8. 
+
+```{r}
+# Chequear los detalles de los contrastes polinómicos
+contr.poly(5)
+contr.poly(7)
+contr.poly(8)
+``` 
+
+Se va a proceder al análisis de los residuos como se solicita en el enunciado.
+
+- En  primer lugar se obtendrá a tabla de análisis de la varianza de los errores
+
+```{r}
+anova(m5)
+```
+
+Como los p-values son muy pequeños, se concluye que hay diferencias significativas para todas la variables incluidas en el modelo, es decir, se rechaza la hipótesis nula de igualdad de medias (para los distintos factores). No obstante, se necesitaría un método de comparaciones múltiples. En caso contrario, el error de tipo I global no estaría controlado. Se podría aplicar Tukey u otros métodos de comparación dos a dos (library multcomp).
+
+Para el diagnóstico del modelo, se va aproceder a comprobar si se cumplen las asunciones para la aplicación de least squares. En primer lugar, se comprobará la homocedasticidad mediante un gráfico de los valores ajustados y los residuos.
+
+```{r}
+residuos <-rstandard(m5)
+valores_ajustados <-fitted(m5)
+plot(valores_ajustados, residuos)
+```
+
+No se observa ningún patrón especial, por lo que tanto la homocedasticidad como la linealidad resultan hipótesis razonables. No obstante, la hipótesis de normalidad se suele comprobar mediante un QQ plot de los residuos y mediante un histograma.
+
+```{r}
+qqnorm(residuos); qqline(residuos)
+hist(residuos)
+```
+
+Dado que los puntos están bastante alineados, la normalidad también parece aceptable.
+
+En último lugar, se comprobará gráficamente la independencia entre la principal variable independiente ('carat') y los residuos del modelo.
+
+```{r}
+plot(carat, residuos)
+```
+
+Se puede asumir la independencia.
+
+Se va a proceder a hacer una predicción del precio de un diamante segun el modelo elegido. Se ha seleccionado una observación de manera aleatoria.
+
+Observación número: 537
+carat: 0.70
+cut: Very Good
+color: D
+clarity:SI1
+depth: 62.3
+table: 59.0
+price: 2827
+x: 5.67
+y: 5.70
+z:3.54
+
+```{r}
+UnDiamante = data.frame(carat = 0.70, cut = "Very Good", color = "D", clarity="SI1")
+modEst = predict(m5, newdata = UnDiamante, interval="prediction", level = .95)
+10^modEst
+```  
+
+El precio predecido es de 2632.951 y el real 2827.
+
+El modelo parace funcionar para la base 'diamonds', que recoge observaciones de precios de 50000 diamantes en el año 2008. No obstante, no se podría afirmar que el modelo es generalizable, y podría utilizarse para predecir el precio de un diamante en cualquier momento del tiempo. Las condiciones económicas: épocas de crisis, aumentos de la inflación, etc, así como las preferencias del consumidor y su renta disponible, o la oferta de diamantes entre otros, son cambiantes en el tiempo. Para la estimación de un modelo que fuese generalizable, mecesitaríamos una base más amplía con series en el tiempo.
+
